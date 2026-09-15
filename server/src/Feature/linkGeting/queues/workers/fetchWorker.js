@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { workerRedis } from "../../../../config/redis.js";
-
+import { scanQueue } from "../../../repoAnalayis/queue/scanQueue.js";
 import {
   findRepositoryById,
   updateRepositoryStatus,
@@ -34,6 +34,7 @@ const fetchWorker = new Worker(
       // 2. Clone repository
       const repositoryPath = await fetchRepository({
         repositoryId: repository.repository_id,
+        repositoryName: repository.repository_name,
         githubUrl: repository.github_url,
       });
 
@@ -41,6 +42,10 @@ const fetchWorker = new Worker(
 
       // 3. Mark as fetched
       await updateRepositoryStatus(repositoryId, "fetched");
+
+      await scanQueue.add("scan-repository", {
+        repositoryId,
+      });
 
       console.log(
         `Repository ${repository.repository_name} status changed to fetched`,

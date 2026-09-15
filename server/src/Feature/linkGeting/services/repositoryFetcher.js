@@ -15,33 +15,36 @@ const __dirname = path.dirname(__filename);
 
 const storageRoot = path.resolve(__dirname, "../../../../storage/repositories");
 
-export async function fetchRepository({ repositoryId, githubUrl, jobId }) {
-  const finalPath = path.join(storageRoot, repositoryId);
-
-  const tempPath = path.join(storageRoot, `${repositoryId}.tmp-${jobId}`);
+export async function fetchRepository({
+  repositoryId,
+  repositoryName,
+  githubUrl,
+}) {
+  const repositoryPath = path.join(storageRoot, repositoryName);
 
   await fs.mkdir(storageRoot, {
     recursive: true,
   });
 
-  await fs.rm(tempPath, {
+  await fs.rm(repositoryPath, {
     recursive: true,
     force: true,
   });
 
   try {
     console.log(`Cloning: ${githubUrl}`);
+    console.log(`Storage path: ${repositoryPath}`);
 
     await execFileAsync(
       "git",
-      ["clone", "--depth", "1", "--no-tags", githubUrl, tempPath],
+      ["clone", "--depth", "1", "--no-tags", githubUrl, repositoryPath],
       {
         windowsHide: true,
         timeout: 10 * 60 * 1000,
       },
     );
 
-    const size = await getDirectorySize(tempPath);
+    const size = await getDirectorySize(repositoryPath);
 
     console.log(`Repository size: ${(size / 1024 / 1024).toFixed(2)} MB`);
 
@@ -49,16 +52,11 @@ export async function fetchRepository({ repositoryId, githubUrl, jobId }) {
       throw new Error("Repository exceeds the maximum allowed size of 100 MB.");
     }
 
-    await fs.rm(finalPath, {
-      recursive: true,
-      force: true,
-    });
+    console.log(`Repository stored at: ${repositoryPath}`);
 
-    await fs.rename(tempPath, finalPath);
-
-    return finalPath;
+    return repositoryPath;
   } catch (error) {
-    await fs.rm(tempPath, {
+    await fs.rm(repositoryPath, {
       recursive: true,
       force: true,
     });
