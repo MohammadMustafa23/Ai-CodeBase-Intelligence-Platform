@@ -4,12 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "worker:fetch": "node --env-file=.env src/Feature/linkGeting/queues/workers/fetchWorker.js"
   },
   "dependencies": {
+    "bullmq": "^6.3.6",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "ioredis": "^6.0.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {

@@ -1,38 +1,28 @@
-import { validateRepositoryUrl } from "../validators/repositoryValidator.js";
-import { createRepository } from "../services/repositoryService.js";
-
+import { createRepository } from "../services/Create_Repo.js";
 export async function createRepositoryController(req, res) {
-  const { url } = req.body;
-
-  const validationError = validateRepositoryUrl(url);
-
-  if (validationError) {
-    return res.status(400).json({
-      success: false,
-      message: validationError,
-    });
-  }
-
   try {
-    const repository = await createRepository(url);
+    const { url } = req.body;
 
-    return res.status(201).json({
-      success: true,
-      data: repository,
-    });
-  } catch (error) {
-    console.error("Create repository error:", error);
+    const result = await createRepository(url);
 
-    if (error.code === "23505") {
+    if (result.exists) {
       return res.status(409).json({
         success: false,
-        message: "Repository already exists.",
+        message: result.message,
+        data: result.repository,
       });
     }
 
+    return res.status(201).json({
+      success: true,
+      data: result.repository,
+    });
+  } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       success: false,
-      message: "Failed to create repository.",
+      message: "Something went wrong",
     });
   }
 }

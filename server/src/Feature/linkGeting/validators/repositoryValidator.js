@@ -1,6 +1,11 @@
-export function validateRepositoryUrl(url) {
+export function validateRepositoryUrl(req, res, next) {
+  const { url } = req.body;
+
   if (!url || typeof url !== "string") {
-    return "Repository URL is required.";
+    return res.status(400).json({
+      success: false,
+      message: "Repository URL is required.",
+    });
   }
 
   const value = url.trim();
@@ -9,27 +14,42 @@ export function validateRepositoryUrl(url) {
     const parsedUrl = new URL(value);
 
     if (parsedUrl.protocol !== "https:") {
-      return "Repository URL must use HTTPS.";
+      return res.status(400).json({
+        success: false,
+        message: "Repository URL must use HTTPS.",
+      });
     }
 
     if (parsedUrl.hostname !== "github.com") {
-      return "Only GitHub repositories are supported.";
+      return res.status(400).json({
+        success: false,
+        message: "Only GitHub repositories are supported.",
+      });
     }
 
     const parts = parsedUrl.pathname.split("/").filter(Boolean);
 
     if (parts.length !== 2) {
-      return "Invalid GitHub repository URL.";
+      return res.status(400).json({
+        success: false,
+        message: "Invalid GitHub repository URL.",
+      });
     }
 
     const [owner, repositoryName] = parts;
 
     if (!owner || !repositoryName) {
-      return "Invalid GitHub repository URL.";
+      return res.status(400).json({
+        success: false,
+        message: "Invalid GitHub repository URL.",
+      });
     }
 
-    return null;
+    next();
   } catch {
-    return "Invalid repository URL.";
+    return res.status(400).json({
+      success: false,
+      message: "Invalid repository URL.",
+    });
   }
 }
