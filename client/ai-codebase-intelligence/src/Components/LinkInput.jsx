@@ -25,9 +25,7 @@ function LinkInput() {
     try {
       setError("");
       setLoading(true);
-
       const result = await submitLink(link);
-
       console.log("Backend response:", result);
     } catch (error) {
       setError(error.message);
