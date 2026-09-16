@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "worker:fetch": "node --env-file=.env src/Feature/linkGeting/queues/workers/fetchWorker.js"
+    "worker:fetch": "node --env-file=.env src/Feature/linkGeting/queues/workers/fetchWorker.js",
+    "worker:scan": "node --env-file=.env src/Feature/repoAnalayis/queue/worker/scanWorker.js"
   },
   "dependencies": {
     "bullmq": "^6.3.6",

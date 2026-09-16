@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import repositoryRoutes from "./Feature/linkGeting/routes/repository.Routes.js";
+import WorkspaceShowRoutes from "./Feature/repoAnalayis/routes/workspace.route.js";
 const app = express();
 
 app.use(
@@ -19,5 +20,5 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/repositories", repositoryRoutes);
-
+app.use("/api/workspaces", WorkspaceShowRoutes);
 export default app;

@@ -48,7 +48,6 @@ export async function updateRepositoryStatus(repositoryId, status) {
       updated_at = NOW()
     WHERE repository_id = $2
   `;
-
   await pool.query(query, [status, repositoryId]);
 }
 
