@@ -95,3 +95,53 @@ export async function findRepositoryFiles(repositoryId) {
 
   return rows;
 }
+
+export async function findAnalyzableFiles(repositoryId) {
+  const query = `
+    SELECT
+      file_id,
+      repository_id,
+      relative_path,
+      file_name,
+      extension,
+      file_type,
+      language,
+      size_bytes,
+      line_count
+    FROM repository_files
+    WHERE repository_id = $1
+      AND analysis_status = 'pending'
+      AND file_type IN ('source', 'test')
+      AND language IS NOT NULL
+    ORDER BY relative_path;
+  `;
+  const { rows } = await pool.query(query, [repositoryId]);
+
+  return rows;
+}
+
+
+export async function updateFileAnalysisStatus(
+  fileId,
+  status,
+  error = null,
+) {
+  const query = `
+    UPDATE repository_files
+    SET
+      analysis_status = $1::varchar,
+      analysis_error = $2::text,
+      analyzed_at = CASE
+        WHEN $1::varchar = 'completed' THEN NOW()
+        ELSE analyzed_at
+      END,
+      updated_at = NOW()
+    WHERE file_id = $3::uuid;
+  `;
+
+  await pool.query(query, [
+    status,
+    error,
+    fileId,
+  ]);
+}

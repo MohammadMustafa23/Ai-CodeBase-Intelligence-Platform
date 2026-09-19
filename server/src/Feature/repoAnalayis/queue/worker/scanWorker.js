@@ -4,9 +4,19 @@ import path from "node:path";
 import { workerRedis } from "../../../../config/redis.js";
 
 import { scanRepository } from "../../service/repositoryScanner.js";
-import { findRepositoryById } from "../../../linkGeting/Db_query/repositoryInsert.js";
-import { updateRepositoryStatus } from "../../../linkGeting/Db_query/repositoryInsert.js";
-import { createRepositoryFiles } from "../../Db_query/repositoryFiles.js";
+
+import {
+  findRepositoryById,
+  updateRepositoryStatus,
+} from "../../../linkGeting/Db_query/repositoryInsert.js";
+
+import {
+  createRepositoryFiles,
+  findAnalyzableFiles,
+  updateFileAnalysisStatus,
+} from "../../Db_query/repositoryFiles.js";
+
+import { analyzeFile } from "../../../codeAnalysis/service/codeAnalyzer.js";
 
 const scanWorker = new Worker(
   "repository-scan",
@@ -25,30 +35,124 @@ const scanWorker = new Worker(
 
     console.log(`Repository found: ${repository.repository_name}`);
 
-    const repositoryPath = path.resolve(
-      process.cwd(),
-      "storage",
-      "repositories",
-      repository.repository_name,
-    );
+    try {
+      // 1. Resolve local repository path
+      const repositoryPath = path.resolve(
+        process.cwd(),
+        "storage",
+        "repositories",
+        repository.repository_name,
+      );
 
-    console.log(`Repository path: ${repositoryPath}`);
+      console.log(`Repository path: ${repositoryPath}`);
 
-    const files = await scanRepository(repositoryPath);
+      // 2. Scan repository
+      const files = await scanRepository(repositoryPath);
 
-    console.log(`Files found: ${files.length}`);
-    const storedFiles = await createRepositoryFiles(repositoryId, files);
+      console.log(`Files found: ${files.length}`);
 
-    console.log(
-      `Stored ${storedFiles.length} files for ${repository.repository_name}`,
-    );
+      // 3. Store Phase 2 file inventory
+      const storedFiles = await createRepositoryFiles(repositoryId, files);
 
-    await updateRepositoryStatus(repositoryId, "scanned");
+      console.log(
+        `Stored ${storedFiles.length} files for ${repository.repository_name}`,
+      );
 
-    return {
-      repositoryId,
-      fileCount: files.length,
-    };
+      // 4. Start Phase 3
+      await updateRepositoryStatus(repositoryId, "analyzing");
+
+      console.log(
+        `Repository ${repository.repository_name} status changed to analyzing`,
+      );
+
+      // 5. Get files that can be analyzed
+      const analyzableFiles = await findAnalyzableFiles(repositoryId);
+
+      console.log(
+        `Files selected for code analysis: ${analyzableFiles.length}`,
+      );
+
+      // 6. Analyze files one by one
+      let completedCount = 0;
+      let failedCount = 0;
+      let unsupportedCount = 0;
+
+      for (const file of analyzableFiles) {
+        console.log(`Analyzing: ${file.relative_path}`);
+        await updateFileAnalysisStatus(file.file_id, "processing");
+        try {
+          const result = await analyzeFile({
+            repositoryPath,
+            file,
+          });
+          if (!result.success) {
+            await updateFileAnalysisStatus(
+              file.file_id,
+              result.status,
+              result.error,
+            );
+
+            if (result.status === "unsupported") {
+              unsupportedCount++;
+            } else {
+              failedCount++;
+            }
+
+            console.log(
+              `Analysis not completed: ${file.relative_path} → ${result.status}`,
+            );
+
+            continue;
+          }
+
+          await updateFileAnalysisStatus(file.file_id, "completed");
+
+          completedCount++;
+
+          console.log(`Analysis completed: ${file.relative_path}`);
+        } catch (error) {
+          failedCount++;
+
+          await updateFileAnalysisStatus(file.file_id, "failed", error.message);
+
+          console.error(
+            `Analysis failed: ${file.relative_path}`,
+            error.message,
+          );
+        }
+      }
+
+      // 7. Repository analysis finished
+      await updateRepositoryStatus(repositoryId, "analyzed");
+
+      console.log(
+        `Repository ${repository.repository_name} status changed to analyzed`,
+      );
+
+      console.log("Analysis summary:", {
+        total: analyzableFiles.length,
+        completed: completedCount,
+        failed: failedCount,
+        unsupported: unsupportedCount,
+      });
+
+      return {
+        repositoryId,
+        fileCount: files.length,
+        analyzableFiles: analyzableFiles.length,
+        analyzedFiles: completedCount,
+        failedFiles: failedCount,
+        unsupportedFiles: unsupportedCount,
+      };
+    } catch (error) {
+      await updateRepositoryStatus(repositoryId, "failed");
+      console.error(
+        `Repository processing failed for ${repository.repository_name}:`,
+        error.message,
+      );
+
+      throw error;
+    }
   },
 
   {
