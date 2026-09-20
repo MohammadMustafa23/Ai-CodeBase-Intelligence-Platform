@@ -18,6 +18,8 @@ import {
 
 import { analyzeFile } from "../../../codeAnalysis/service/codeAnalyzer.js";
 
+import { analyzeRepositoryRelationships } from "../../../relationshipAnalysis/service/relationshipAnalyzer.js";
+
 const scanWorker = new Worker(
   "repository-scan",
 
@@ -36,7 +38,10 @@ const scanWorker = new Worker(
     console.log(`Repository found: ${repository.repository_name}`);
 
     try {
-      // 1. Resolve local repository path
+      // ==========================================
+      // Repository Path
+      // ==========================================
+
       const repositoryPath = path.resolve(
         process.cwd(),
         "storage",
@@ -46,45 +51,59 @@ const scanWorker = new Worker(
 
       console.log(`Repository path: ${repositoryPath}`);
 
-      // 2. Scan repository
+      // ==========================================
+      // PHASE 2
+      // Repository Scan
+      // ==========================================
+
+      await updateRepositoryStatus(repositoryId, "scanning");
+
+      console.log(
+        `Repository ${repository.repository_name} status changed to scanning`,
+      );
+
       const files = await scanRepository(repositoryPath);
 
       console.log(`Files found: ${files.length}`);
 
-      // 3. Store Phase 2 file inventory
       const storedFiles = await createRepositoryFiles(repositoryId, files);
 
       console.log(
         `Stored ${storedFiles.length} files for ${repository.repository_name}`,
       );
 
-      // 4. Start Phase 3
+      // ==========================================
+      // PHASE 3
+      // Static Code Analysis
+      // ==========================================
+
       await updateRepositoryStatus(repositoryId, "analyzing");
 
       console.log(
         `Repository ${repository.repository_name} status changed to analyzing`,
       );
 
-      // 5. Get files that can be analyzed
       const analyzableFiles = await findAnalyzableFiles(repositoryId);
 
       console.log(
         `Files selected for code analysis: ${analyzableFiles.length}`,
       );
 
-      // 6. Analyze files one by one
       let completedCount = 0;
       let failedCount = 0;
       let unsupportedCount = 0;
 
       for (const file of analyzableFiles) {
         console.log(`Analyzing: ${file.relative_path}`);
+
         await updateFileAnalysisStatus(file.file_id, "processing");
+
         try {
           const result = await analyzeFile({
             repositoryPath,
             file,
           });
+
           if (!result.success) {
             await updateFileAnalysisStatus(
               file.file_id,
@@ -122,12 +141,7 @@ const scanWorker = new Worker(
         }
       }
 
-      // 7. Repository analysis finished
-      await updateRepositoryStatus(repositoryId, "analyzed");
-
-      console.log(
-        `Repository ${repository.repository_name} status changed to analyzed`,
-      );
+      console.log(`Phase 3 completed for ${repository.repository_name}`);
 
       console.log("Analysis summary:", {
         total: analyzableFiles.length,
@@ -136,16 +150,69 @@ const scanWorker = new Worker(
         unsupported: unsupportedCount,
       });
 
+      // ==========================================
+      // PHASE 4
+      // Relationship Analysis
+      // ==========================================
+
+      console.log(
+        `Starting Phase 4 relationship analysis for ${repository.repository_name}`,
+      );
+
+      const relationshipResult = await analyzeRepositoryRelationships(repositoryId);
+
+      console.log(`Phase 4 completed for ${repository.repository_name}`);
+
+      console.log("Relationship summary:", {
+        totalReferences: relationshipResult.totalReferences,
+
+        processed: relationshipResult.processed,
+
+        resolved: relationshipResult.resolved,
+
+        unresolved: relationshipResult.unresolved,
+
+        external: relationshipResult.external,
+      });
+
+      // ==========================================
+      // REPOSITORY READY
+      // ==========================================
+
+      await updateRepositoryStatus(repositoryId, "ready");
+
+      console.log(
+        `Repository ${repository.repository_name} status changed to ready`,
+      );
+
       return {
         repositoryId,
+
         fileCount: files.length,
+
         analyzableFiles: analyzableFiles.length,
+
         analyzedFiles: completedCount,
+
         failedFiles: failedCount,
+
         unsupportedFiles: unsupportedCount,
+
+        relationships: {
+          totalReferences: relationshipResult.totalReferences,
+
+          processed: relationshipResult.processed,
+
+          resolved: relationshipResult.resolved,
+
+          unresolved: relationshipResult.unresolved,
+
+          external: relationshipResult.external,
+        },
       };
     } catch (error) {
       await updateRepositoryStatus(repositoryId, "failed");
+
       console.error(
         `Repository processing failed for ${repository.repository_name}:`,
         error.message,
@@ -166,6 +233,10 @@ const scanWorker = new Worker(
     },
   },
 );
+
+// ==========================================
+// Worker Events
+// ==========================================
 
 scanWorker.on("ready", () => {
   console.log("Scan worker is ready");
