@@ -20,6 +20,8 @@ import { analyzeFile } from "../../../codeAnalysis/service/codeAnalyzer.js";
 
 import { analyzeRepositoryRelationships } from "../../../relationshipAnalysis/service/relationshipAnalyzer.js";
 
+import { buildKnowledgeGraph } from "../../../knowledgeGraph/service/graphBuilder.js";
+
 const scanWorker = new Worker(
   "repository-scan",
 
@@ -159,7 +161,8 @@ const scanWorker = new Worker(
         `Starting Phase 4 relationship analysis for ${repository.repository_name}`,
       );
 
-      const relationshipResult = await analyzeRepositoryRelationships(repositoryId);
+      const relationshipResult =
+        await analyzeRepositoryRelationships(repositoryId);
 
       console.log(`Phase 4 completed for ${repository.repository_name}`);
 
@@ -173,6 +176,27 @@ const scanWorker = new Worker(
         unresolved: relationshipResult.unresolved,
 
         external: relationshipResult.external,
+      });
+
+      // ==========================================
+      // PHASE 5
+      // Knowledge Graph
+      // ==========================================
+
+      console.log(
+        `Starting Phase 5 knowledge graph build for ${repository.repository_name}`,
+      );
+
+      const graphResult = await buildKnowledgeGraph(repositoryId);
+
+      console.log(
+        `Phase 5 knowledge graph completed for ${repository.repository_name}`,
+      );
+
+      console.log("Knowledge graph summary:", {
+        files: graphResult.fileCount,
+        symbols: graphResult.symbolCount,
+        relationships: graphResult.relationshipCount,
       });
 
       // ==========================================
@@ -200,14 +224,16 @@ const scanWorker = new Worker(
 
         relationships: {
           totalReferences: relationshipResult.totalReferences,
-
           processed: relationshipResult.processed,
-
           resolved: relationshipResult.resolved,
-
           unresolved: relationshipResult.unresolved,
-
           external: relationshipResult.external,
+        },
+
+        graph: {
+          files: graphResult.fileCount,
+          symbols: graphResult.symbolCount,
+          relationships: graphResult.relationshipCount,
         },
       };
     } catch (error) {
