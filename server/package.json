@@ -14,6 +14,7 @@
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "ioredis": "^6.0.0",
+    "neo4j-driver": "^6.2.0",
     "pg": "^8.23.0",
     "tree-sitter": "^0.21.1",
     "tree-sitter-cpp": "^0.23.4",
