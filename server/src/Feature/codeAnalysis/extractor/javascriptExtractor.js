@@ -48,6 +48,40 @@ function extractClass(node) {
     ...getNodeLocation(node),
   };
 }
+
+function extractVariableFunction(node) {
+  const nameNode = node.childForFieldName("name");
+  const valueNode = node.childForFieldName("value");
+
+  if (!nameNode || !valueNode) {
+    return null;
+  }
+
+  if (
+    valueNode.type !== "arrow_function" &&
+    valueNode.type !== "function_expression"
+  ) {
+    return null;
+  }
+
+  return {
+    symbolName: nameNode.text,
+    symbolType: "function",
+    signature: valueNode.text.split("{")[0].trim(),
+    ...getNodeLocation(valueNode),
+  };
+}
+
+function extractMethod(node) {
+  const name = getNodeName(node);
+
+  return {
+    symbolName: name || "anonymous",
+    symbolType: "method",
+    signature: node.text.split("{")[0].trim(),
+    ...getNodeLocation(node),
+  };
+}
 function extractImport(node) {
   const sourceNode = node.childForFieldName("source");
 
@@ -221,6 +255,20 @@ function walkTree(node, result) {
       result.symbols.push(extractClass(node));
       break;
 
+    case "variable_declarator": {
+      const symbol = extractVariableFunction(node);
+
+      if (symbol) {
+        result.symbols.push(symbol);
+      }
+
+      break;
+    }
+
+    case "method_definition":
+      result.symbols.push(extractMethod(node));
+      break;
+
     case "import_statement":
       result.references.push(extractImport(node));
       break;
@@ -237,7 +285,6 @@ function walkTree(node, result) {
     walkTree(child, result);
   }
 }
-
 export function extractJavaScript(tree) {
   const result = {
     symbols: [],
