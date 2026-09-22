@@ -22,6 +22,10 @@ import { analyzeRepositoryRelationships } from "../../../relationshipAnalysis/se
 
 import { buildKnowledgeGraph } from "../../../knowledgeGraph/service/graphBuilder.js";
 
+import { buildRepositoryCodeChunks } from "../../../codeChunking/service/codeChunker.js";
+
+import { processEmbeddingBatch } from "../../../embeddings/service/processEmbeddingBatch.js";
+
 const scanWorker = new Worker(
   "repository-scan",
 
@@ -200,6 +204,30 @@ const scanWorker = new Worker(
       });
 
       // ==========================================
+      // PHASE 6
+      // Code Chunking
+      // ==========================================
+
+      await updateRepositoryStatus(repositoryId, "chunking");
+
+      console.log(
+        `Starting Phase 6 code chunking for ${repository.repository_name}`,
+      );
+
+      const chunkResult = await buildRepositoryCodeChunks(repositoryId);
+
+      console.log(
+        `Phase 6 code chunking completed for ${repository.repository_name}`,
+      );
+
+      console.log("Code chunking summary:", {
+        files: chunkResult.fileCount,
+        symbols: chunkResult.symbolCount,
+        chunks: chunkResult.chunkCount,
+      });
+
+
+      // ==========================================
       // REPOSITORY READY
       // ==========================================
 
@@ -234,6 +262,16 @@ const scanWorker = new Worker(
           files: graphResult.fileCount,
           symbols: graphResult.symbolCount,
           relationships: graphResult.relationshipCount,
+        },
+
+        chunking: {
+          files: chunkResult.fileCount,
+          symbols: chunkResult.symbolCount,
+          chunks: chunkResult.chunkCount,
+        },
+
+        embeddings: {
+          processed: embeddingResult,
         },
       };
     } catch (error) {
