@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { getRepositoryFiles } from "../service/Repo_Show/repositoryApi";
+import {
+  createConversation,
+  getConversationMessages,
+  sendMessage,
+} from "../service/chatService/chatService.js";
+
 import "./Workspace.css";
 
 function buildTree(files) {
@@ -9,7 +15,6 @@ function buildTree(files) {
 
   for (const file of files) {
     const parts = file.relative_path.split("/");
-
     let current = root;
 
     parts.forEach((part, index) => {
@@ -47,7 +52,6 @@ function FileTree({ tree, level = 0, onFileClick, selectedFile }) {
               onClick={() => onFileClick(value)}
             >
               <span className="tree-icon">📄</span>
-
               <span>{name}</span>
             </div>
           );
@@ -62,7 +66,6 @@ function FileTree({ tree, level = 0, onFileClick, selectedFile }) {
               }}
             >
               <span className="tree-icon">📁</span>
-
               <span>{name}</span>
             </div>
 
@@ -88,6 +91,24 @@ function Workspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // ----------------------------------------
+  // Chat state
+  // ----------------------------------------
+
+  const [conversationId, setConversationId] = useState(null);
+
+  const [messages, setMessages] = useState([]);
+
+  const [messageInput, setMessageInput] = useState("");
+
+  const [chatLoading, setChatLoading] = useState(false);
+
+  const [chatError, setChatError] = useState("");
+
+  // ----------------------------------------
+  // Load repository files
+  // ----------------------------------------
+
   useEffect(() => {
     async function loadFiles() {
       try {
@@ -98,7 +119,7 @@ function Workspace() {
 
         console.log("Fetched files:", data);
 
-        setFiles(Array.isArray(data.data) ? data.data : []);
+        setFiles(Array.isArray(data?.data) ? data.data : []);
       } catch (error) {
         console.error("Failed to load repository files:", error);
 
@@ -108,8 +129,121 @@ function Workspace() {
       }
     }
 
-    loadFiles();
+    if (repositoryId) {
+      loadFiles();
+    }
   }, [repositoryId]);
+
+  // ----------------------------------------
+  // Create / restore conversation
+  // ----------------------------------------
+
+  useEffect(() => {
+    async function setupConversation() {
+      if (!repositoryId) {
+        return;
+      }
+
+      try {
+        setChatError("");
+
+        const storageKey = `conversation_${repositoryId}`;
+
+        const savedConversationId = localStorage.getItem(storageKey);
+
+        let activeConversationId = savedConversationId;
+
+        // Existing conversation
+        if (activeConversationId) {
+          try {
+            const response =
+              await getConversationMessages(activeConversationId);
+
+            setMessages(Array.isArray(response?.data) ? response.data : []);
+
+            setConversationId(activeConversationId);
+
+            return;
+          } catch (error) {
+            console.log("Saved conversation unavailable. Creating a new one.");
+
+            localStorage.removeItem(storageKey);
+            activeConversationId = null;
+          }
+        }
+
+        // First conversation for this repository
+        if (!activeConversationId) {
+          const response = await createConversation({
+            repositoryId,
+            title: "Repository Chat",
+          });
+
+          activeConversationId = response?.data?.conversation_id;
+
+          if (!activeConversationId) {
+            throw new Error("Conversation ID was not returned.");
+          }
+
+          localStorage.setItem(storageKey, activeConversationId);
+
+          setConversationId(activeConversationId);
+
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error("Failed to setup conversation:", error);
+
+        setChatError("Failed to start conversation.");
+      }
+    }
+
+    setupConversation();
+  }, [repositoryId]);
+
+  // ----------------------------------------
+  // Send message
+  // ----------------------------------------
+
+  async function handleSendMessage(event) {
+    event.preventDefault();
+
+    const content = messageInput.trim();
+
+    if (!content || !conversationId) {
+      return;
+    }
+
+    try {
+      setChatLoading(true);
+      setChatError("");
+
+      const response = await sendMessage({
+        conversationId,
+        content,
+      });
+
+      const userMessage = response?.data?.userMessage;
+
+      const assistantMessage = response?.data?.assistantMessage;
+
+      if (userMessage) {
+        setMessages((current) => [...current, userMessage]);
+      }
+
+      if (assistantMessage) {
+        setMessages((current) => [...current, assistantMessage]);
+      }
+
+      setMessageInput("");
+    } catch (error) {
+      console.error("Failed to send message:", error);
+
+      setChatError(error.message || "Failed to send message.");
+    } finally {
+      setChatLoading(false);
+    }
+  }
 
   if (loading) {
     return <div className="workspace-state">Loading repository...</div>;
@@ -124,6 +258,7 @@ function Workspace() {
   return (
     <section className="workspace">
       {/* Header */}
+
       <header className="workspace-header">
         <div>
           <h1>Repository Workspace</h1>
@@ -135,8 +270,10 @@ function Workspace() {
       </header>
 
       {/* Main */}
+
       <div className="workspace-body">
         {/* Left Sidebar */}
+
         <aside className="file-sidebar">
           <div className="sidebar-title">Files</div>
 
@@ -152,55 +289,110 @@ function Workspace() {
         </aside>
 
         {/* Right Side */}
+
         <main className="workspace-content">
-          {!selectedFile ? (
-            <div className="empty-workspace">
-              <div className="empty-icon">⌘</div>
+          {/* File information */}
 
-              <h2>Select a file</h2>
+          <div className="workspace-file-area">
+            {!selectedFile ? (
+              <div className="empty-workspace">
+                <div className="empty-icon">⌘</div>
 
-              <p>
-                Select a file from the workspace to inspect its information.
-              </p>
-            </div>
-          ) : (
-            <div className="file-details">
-              <div className="file-details-header">
-                <div>
-                  <h2>{selectedFile.file_name}</h2>
+                <h2>Select a file</h2>
 
-                  <p>{selectedFile.relative_path}</p>
+                <p>
+                  Select a file from the workspace to inspect its information.
+                </p>
+              </div>
+            ) : (
+              <div className="file-details">
+                <div className="file-details-header">
+                  <div>
+                    <h2>{selectedFile.file_name}</h2>
+
+                    <p>{selectedFile.relative_path}</p>
+                  </div>
+                </div>
+
+                <div className="file-meta">
+                  <div className="meta-item">
+                    <span>Type</span>
+                    <strong>{selectedFile.file_type}</strong>
+                  </div>
+
+                  <div className="meta-item">
+                    <span>Language</span>
+                    <strong>{selectedFile.language || "—"}</strong>
+                  </div>
+
+                  <div className="meta-item">
+                    <span>Extension</span>
+                    <strong>{selectedFile.extension || "—"}</strong>
+                  </div>
+
+                  <div className="meta-item">
+                    <span>Size</span>
+                    <strong>{selectedFile.size_bytes} bytes</strong>
+                  </div>
+
+                  <div className="meta-item">
+                    <span>Lines</span>
+                    <strong>{selectedFile.line_count ?? "—"}</strong>
+                  </div>
                 </div>
               </div>
+            )}
+          </div>
 
-              <div className="file-meta">
-                <div className="meta-item">
-                  <span>Type</span>
-                  <strong>{selectedFile.file_type}</strong>
-                </div>
+          {/* Basic Chat */}
 
-                <div className="meta-item">
-                  <span>Language</span>
-                  <strong>{selectedFile.language || "—"}</strong>
-                </div>
+          <div className="basic-chat">
+            <div className="basic-chat-header">
+              <h2>Repository Chat</h2>
 
-                <div className="meta-item">
-                  <span>Extension</span>
-                  <strong>{selectedFile.extension || "—"}</strong>
-                </div>
-
-                <div className="meta-item">
-                  <span>Size</span>
-                  <strong>{selectedFile.size_bytes} bytes</strong>
-                </div>
-
-                <div className="meta-item">
-                  <span>Lines</span>
-                  <strong>{selectedFile.line_count ?? "—"}</strong>
-                </div>
-              </div>
+              {conversationId && <span>Connected</span>}
             </div>
-          )}
+
+            <div className="basic-chat-messages">
+              {messages.length === 0 ? (
+                <div className="basic-chat-empty">
+                  Ask something about this repository.
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <div
+                    key={message.message_id}
+                    className={`chat-message ${message.role}`}
+                  >
+                    <strong>{message.role === "user" ? "You" : "AI"}</strong>
+
+                    <p>{message.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {chatError && <div className="basic-chat-error">{chatError}</div>}
+
+            <form className="basic-chat-form" onSubmit={handleSendMessage}>
+              <input
+                type="text"
+                value={messageInput}
+                onChange={(event) => setMessageInput(event.target.value)}
+                placeholder="Ask something..."
+                disabled={chatLoading}
+              />
+
+              <button
+                type="submit"
+                disabled={
+                  chatLoading || !messageInput.trim() || !conversationId
+                }
+              >
+                {chatLoading ? "Sending..." : "Send"}
+              </button>
+            </form>
+          </div>
         </main>
       </div>
     </section>
