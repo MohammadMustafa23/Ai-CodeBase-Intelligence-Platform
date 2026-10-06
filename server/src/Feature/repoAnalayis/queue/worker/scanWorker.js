@@ -1,6 +1,5 @@
 import { Worker } from "bullmq";
 import path from "node:path";
-
 import { workerRedis } from "../../../../config/redis.js";
 
 import { scanRepository } from "../../service/repositoryScanner.js";
@@ -26,6 +25,13 @@ import { buildRepositoryCodeChunks } from "../../../codeChunking/service/codeChu
 
 import { processEmbeddingBatch } from "../../../embeddings/service/processEmbeddingBatch.js";
 
+import {
+  getNextEmbeddingRetryAt,
+  getEmbeddingSummary,
+} from "../../../embeddings/Db_query/embeddingChunks.js";
+
+import { scheduleEmbeddingRetry } from "../scanQueue.js";
+
 const scanWorker = new Worker(
   "repository-scan",
 
@@ -34,6 +40,93 @@ const scanWorker = new Worker(
 
     console.log("Scan job received:", job.id);
     console.log("Repository ID:", repositoryId);
+
+    // ---------------------------------------------
+    // Phase 7 - Embedding Retry Job
+    // ---------------------------------------------
+    if (job.name === "embedding-retry") {
+      console.log(`[Embedding Retry] Job received: ${job.id}`);
+
+      const repository = await findRepositoryById(repositoryId);
+
+      if (!repository) {
+        throw new Error(`Repository ${repositoryId} not found`);
+      }
+
+      await updateRepositoryStatus(repositoryId, "embedding");
+
+      const embeddingResult = await processEmbeddingBatch({
+        repositoryId,
+        batchSize: 50,
+      });
+
+      console.log(
+        `[Embedding Retry] Processed: ${embeddingResult.processedCount}`,
+      );
+
+      console.log(`[Embedding Retry] Failed: ${embeddingResult.failedCount}`);
+
+      const embeddingSummary = await getEmbeddingSummary({
+        repositoryId,
+      });
+
+      console.log("[Embedding Retry Summary]:", embeddingSummary);
+
+      const nextRetryAt = await getNextEmbeddingRetryAt({
+        repositoryId,
+      });
+
+      if (nextRetryAt) {
+        await scheduleEmbeddingRetry({
+          repositoryId,
+          retryAt: nextRetryAt,
+        });
+
+        console.log(
+          `[Embedding Retry] Next retry scheduled for: ${nextRetryAt}`,
+        );
+
+        await updateRepositoryStatus(repositoryId, "embedding");
+
+        return {
+          type: "embedding-retry",
+          status: "retry_scheduled",
+          summary: embeddingSummary,
+          nextRetryAt,
+        };
+      }
+
+      if (embeddingSummary.pending > 0 || embeddingSummary.processing > 0) {
+        await updateRepositoryStatus(repositoryId, "embedding");
+
+        return {
+          type: "embedding-retry",
+          status: "still_processing",
+          summary: embeddingSummary,
+          nextRetryAt: null,
+        };
+      }
+
+      if (embeddingSummary.permanently_failed > 0) {
+        await updateRepositoryStatus(repositoryId, "partial");
+
+        return {
+          type: "embedding-retry",
+          status: "partial",
+          summary: embeddingSummary,
+          nextRetryAt: null,
+        };
+      }
+
+      await updateRepositoryStatus(repositoryId, "ready");
+
+      return {
+        type: "embedding-retry",
+        status: "completed",
+        summary: embeddingSummary,
+        nextRetryAt: null,
+      };
+    }
 
     const repository = await findRepositoryById(repositoryId);
 
@@ -226,16 +319,65 @@ const scanWorker = new Worker(
         chunks: chunkResult.chunkCount,
       });
 
-
       // ==========================================
-      // REPOSITORY READY
+      // PHASE 7
+      // Semantic Embeddings
       // ==========================================
-
-      await updateRepositoryStatus(repositoryId, "ready");
 
       console.log(
-        `Repository ${repository.repository_name} status changed to ready`,
+        `Phase 7 start Embeddings For : " ${repository.repository_name}`,
       );
+
+      // Phase 7 - Embeddings
+      await updateRepositoryStatus(repositoryId, "embedding");
+
+      const embeddingResult = await processEmbeddingBatch({
+        repositoryId,
+        batchSize: 50,
+      });
+
+      console.log(`[Embedding] Processed: ${embeddingResult.processedCount}`);
+      console.log(`[Embedding] Failed: ${embeddingResult.failedCount}`);
+
+      const embeddingSummary = await getEmbeddingSummary({
+        repositoryId,
+      });
+
+      console.log("[Embedding Summary]:", embeddingSummary);
+
+      const nextRetryAt = await getNextEmbeddingRetryAt({
+        repositoryId,
+      });
+
+      if (nextRetryAt) {
+        await scheduleEmbeddingRetry({
+          repositoryId,
+          retryAt: nextRetryAt,
+        });
+
+        await updateRepositoryStatus(repositoryId, "embedding");
+
+        console.log(`[Embedding] Retry scheduled for: ${nextRetryAt}`);
+      } else if (
+        embeddingSummary.pending > 0 ||
+        embeddingSummary.processing > 0
+      ) {
+        await updateRepositoryStatus(repositoryId, "embedding");
+
+        console.log(
+          `[Embedding] Work still exists. Pending: ${embeddingSummary.pending}, Processing: ${embeddingSummary.processing}`,
+        );
+      } else if (embeddingSummary.permanently_failed > 0) {
+        await updateRepositoryStatus(repositoryId, "partial");
+
+        console.log(
+          `[Embedding] ${embeddingSummary.permanently_failed} chunks permanently failed.`,
+        );
+      } else {
+        await updateRepositoryStatus(repositoryId, "ready");
+
+        console.log("[Embedding] All chunks completed. Repository READY.");
+      }
 
       return {
         repositoryId,
@@ -270,9 +412,9 @@ const scanWorker = new Worker(
           chunks: chunkResult.chunkCount,
         },
 
-        embeddings: {
-          processed: embeddingResult,
-        },
+        // embeddings: {
+        //   processed: embeddingResult,
+        // },
       };
     } catch (error) {
       await updateRepositoryStatus(repositoryId, "failed");
