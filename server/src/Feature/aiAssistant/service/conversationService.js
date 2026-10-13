@@ -1,7 +1,14 @@
-import { createConversation } from "../Db_query/conversations.js";
+import {
+  createConversation,
+  getConversationByRepositoryId,
+  getAllConversations,
+} from "../Db_query/conversations.js";
 
 import { findRepositoryById } from "../../linkGeting/Db_query/repositoryInsert.js";
 
+/**
+ * Create a new conversation.
+ */
 export async function createNewConversation({
   repositoryId = null,
   title = null,
@@ -25,4 +32,18 @@ export async function createNewConversation({
     repositoryId,
     title,
   });
+}
+
+/**
+ * Get the single conversation belonging to a repository.
+ */
+export async function getRepositoryConversation(repositoryId) {
+  return await getConversationByRepositoryId(repositoryId);
+}
+
+/**
+ * Get all repository conversations.
+ */
+export async function getAllRepositoryConversations(userId) {
+  return await getAllConversations(userId);
 }
